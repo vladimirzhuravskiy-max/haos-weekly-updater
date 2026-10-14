@@ -9,7 +9,7 @@ RUN apk add --no-cache \
     bash \
     tzdata \
     dcron \
-    && curl -fsSL https://github.com/home-assistant/cli/releases/download/5.5.0/hassio-linux-amd64 \
+    && curl -fsSL https://github.com/home-assistant/cli/releases/download/5.5.0/ha_amd64 \
     -o /usr/local/bin/ha \
     && chmod +x /usr/local/bin/ha
 
