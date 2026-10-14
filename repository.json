@@ -1,0 +1,8 @@
+{
+  "name": "HAOS Weekly Updater Repository",
+  "url": "https://github.com/vladimirzhuravskiy-max/haos-weekly-updater",
+  "maintainer": "vladimirzhuravskiy-max",
+  "addons": [
+    "haos_weekly_updater"
+  ]
+}
