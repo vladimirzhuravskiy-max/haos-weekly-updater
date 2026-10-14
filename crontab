@@ -1,0 +1,5 @@
+# HAOS Weekly Updater - runs every Monday at 08:00
+0 8 * * 1 /update-script.sh
+
+# Daily log cleanup at 03:00
+0 3 * * * find /data -name 'update-*.log' -mtime +30 -delete

@@ -1,0 +1,31 @@
+name: "HAOS Weekly Updater"
+version: "1.0.0"
+slug: "haos_weekly_updater"
+description: "Автоматичне оновлення HAOS, Core, аддонів щотижня в понеділок о 8:00 з повідомленням в Telegram"
+arch:
+  - amd64
+  - aarch64
+url: "https://github.com/vzbudget/homelab/tree/main/addons/haos-weekly-updater"
+startup: services
+boot: auto
+init: false
+hassio_api: true
+homeassistant_api: true
+host_network: true
+privileged: true
+map:
+  - data:rw
+options:
+  telegram_bot_token: ""
+  telegram_chat_id: ""
+  admin_chat_id: ""
+  timezone: "Europe/Kyiv"
+  log_retention_days: 30
+schema:
+  telegram_bot_token: str
+  telegram_chat_id: str
+  admin_chat_id: str
+  timezone: str
+  log_retention_days: int
+ports:
+  22222/tcp: 22222
