@@ -1,5 +1,7 @@
 # HAOS Weekly Updater Add-on
 
+> **AI-generated project.** Цей аддон був написаний з використанням штучного інтелекту (OpenAI Codex) як інструменту допомоги в розробці.
+
 Автоматичне оновлення Home Assistant OS, Core та аддонів щотижня в понеділок о 8:00 ранку з повідомленням у Telegram.
 
 ## Особливості
@@ -130,8 +132,8 @@ haos_weekly_updater/
 
 | Проблема | Рішення |
 |----------|---------|
-| "ha: command not found" | Перевірте `hassio_api: true` в config.yaml |
-| "Permission denied" | `privileged: true` + `host_network: true` |
+| "ha: command not found" | Перевірте `hassio_api: true` та `hassio_role: admin` в config.yaml |
+| "Permission denied" | `full_access: true` + `host_network: true` |
 | Cron не запускається | Перевірте логи: `ha addons logs haos_weekly_updater` |
 | Telegram не працює | Перевірте token/chat_id, чи є інтернет у контейнері |
 | Диск переповнений | Зменшіть `log_retention_days`, перевірте `/data` |
