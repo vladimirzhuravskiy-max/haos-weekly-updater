@@ -8,7 +8,12 @@ RUN apk add --no-cache \
     curl \
     bash \
     tzdata \
-    dcron
+    dcron \
+    && curl -fsSL https://github.com/home-assistant/cli/releases/download/4.38.0/hassio-linux-amd64 \
+    -o /usr/local/bin/ha \
+    && chmod +x /usr/local/bin/ha
+
+ENV HASSIO_TOKEN=${HASSIO_TOKEN}
 
 COPY run.sh /run.sh
 COPY update-script.sh /update-script.sh
