@@ -67,9 +67,15 @@ echo "→ Checking addon updates..."
 ADDONS_UPDATED=0
 ADDONS_FAILED=0
 
-for addon in $(ha addons list --format json 2>/dev/null | jq -r '.[] | select(.update_available == true) | .slug'); do
+# NOTE: `ha` CLI (v5.x) has no "addons list" and no "--format" flag:
+#   list all add-ons  -> ha apps info --raw-json   (payload under .data)
+#   single add-on     -> ha apps info <slug> --raw-json
+ADDONS_JSON=$(timeout 60 ha apps info --raw-json 2>&1 || true)
+echo "  DIAG: apps info -> $(echo "$ADDONS_JSON" | head -c 100)"
+
+for addon in $(echo "$ADDONS_JSON" | jq -r '.data[]? | select(.update_available == true) | .slug' 2>/dev/null); do
     echo "  Updating addon: $addon"
-    if ha addons update "$addon" 2>&1 | tail -5; then
+    if timeout 600 ha apps update "$addon" 2>&1 | tail -5; then
         UPDATED+=("Addon: $addon")
         ADDONS_UPDATED=$((ADDONS_UPDATED + 1))
     else
@@ -84,12 +90,12 @@ fi
 
 # 2. Update HA Core
 echo "→ Checking HA Core update..."
-CORE_INFO=$(ha core info --format json 2>/dev/null || echo '{}')
-if echo "$CORE_INFO" | jq -e '.update_available == true' > /dev/null; then
-    CURRENT=$(echo "$CORE_INFO" | jq -r '.version // "unknown"')
-    LATEST=$(echo "$CORE_INFO" | jq -r '.version_latest // "unknown"')
+CORE_INFO=$(timeout 60 ha core info --raw-json 2>/dev/null || echo '{}')
+if echo "$CORE_INFO" | jq -e '.data.update_available == true' > /dev/null; then
+    CURRENT=$(echo "$CORE_INFO" | jq -r '.data.version // "unknown"')
+    LATEST=$(echo "$CORE_INFO" | jq -r '.data.version_latest // "unknown"')
     echo "  Updating HA Core: $CURRENT -> $LATEST"
-    if ha core update 2>&1 | tail -5; then
+    if timeout 900 ha core update 2>&1 | tail -5; then
         UPDATED+=("HA Core ($CURRENT -> $LATEST)")
     else
         FAILED+=("HA Core ($CURRENT -> $LATEST)")
@@ -112,8 +118,13 @@ INTEGRATIONS_FAILED=0
 #   - add-on updates (step 1, they come with entity_picture=/api/hassio/...)
 #   - device firmware (OTA of ESPHome/Zigbee devices is not touched)
 echo "  DIAG: SUPERVISOR_TOKEN len=${#SUPERVISOR_TOKEN}"
-HA_LIST_OUT=$(timeout 30 ha addons list --format json 2>&1 || true)
-echo "  DIAG: ha addons list -> $(echo "$HA_LIST_OUT" | tr -d '\n' | head -c 120)"
+# TEMP DIAG: who answers and with what (status + Server header + body)
+for P in /addons/self/info /core/api/config /core/api/states; do
+    C=$(curl -s -o /tmp/p.json -D /tmp/p.hdr -w '%{http_code}' --max-time 30 \
+        -H "X-Supervisor-Token: ${SUPERVISOR_TOKEN}" "http://supervisor$P" 2>/dev/null || echo '000')
+    S=$(grep -i '^server:' /tmp/p.hdr 2>/dev/null | tr -d '\r')
+    echo "  DIAG: GET http://supervisor$P -> HTTP $C ${S}body=$(head -c 100 /tmp/p.json 2>/dev/null | tr -d '\n')"
+done
 
 HTTP_CODE=$(curl -s -o /tmp/ha_states.json -w '%{http_code}' --max-time 60 \
     -H "X-Supervisor-Token: ${SUPERVISOR_TOKEN:-}" \
@@ -174,12 +185,12 @@ fi
 
 # 4. Update HAOS
 echo "→ Checking HAOS update..."
-OS_INFO=$(ha os info --format json 2>/dev/null || echo '{}')
-if echo "$OS_INFO" | jq -e '.update_available == true' > /dev/null; then
-    CURRENT=$(echo "$OS_INFO" | jq -r '.version // "unknown"')
-    LATEST=$(echo "$OS_INFO" | jq -r '.version_latest // "unknown"')
+OS_INFO=$(timeout 60 ha os info --raw-json 2>/dev/null || echo '{}')
+if echo "$OS_INFO" | jq -e '.data.update_available == true' > /dev/null; then
+    CURRENT=$(echo "$OS_INFO" | jq -r '.data.version // "unknown"')
+    LATEST=$(echo "$OS_INFO" | jq -r '.data.version_latest // "unknown"')
     echo "  Updating HAOS: $CURRENT -> $LATEST"
-    if ha os update 2>&1 | tail -5; then
+    if timeout 1800 ha os update 2>&1 | tail -5; then
         UPDATED+=("HAOS ($CURRENT -> $LATEST)")
         NEED_REBOOT=1
     else
