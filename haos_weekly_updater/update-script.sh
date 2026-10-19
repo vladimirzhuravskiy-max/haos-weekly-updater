@@ -181,6 +181,11 @@ else
     PENDING_COUNT=$(echo "$PENDING_INTEGRATIONS" | jq 'length')
     echo "  Found $PENDING_COUNT integration update(s)"
 
+    # TEMP DIAG: attribute keys/values to build a reliable add-on filter
+    for E in $(jq -r '[.[] | select(.entity_id | startswith("update.")) | select(.attributes.installed_version != null) | .entity_id][0:8][]' /tmp/ha_states.json 2>/dev/null); do
+        echo "  DIAGATTR $E :: $(jq -c --arg e "$E" '.[] | select(.entity_id == $e) | .attributes' /tmp/ha_states.json 2>/dev/null | head -c 500)"
+    done
+
     if [ "$PENDING_COUNT" -gt 0 ]; then
         echo "$PENDING_INTEGRATIONS" | jq -r '.[] | "  - \(.name) (\(.installed) -> \(.latest)) [\(.entity)]"'
 
