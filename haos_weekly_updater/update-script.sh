@@ -19,6 +19,9 @@ fi
 LOG_FILE="/data/update-$(date +%F).log"
 exec > >(tee -a "$LOG_FILE") 2>&1
 
+# Supervisor token is injected by the Supervisor (hassio_api: true)
+SUPERVISOR_TOKEN="${SUPERVISOR_TOKEN:-}"
+
 echo "=== HAOS Weekly Update $(date) ==="
 
 UPDATED=()
@@ -45,7 +48,12 @@ START_TIME=$(date +%s)
 
 # 1. Update Add-ons
 echo "→ Refreshing app stores (git pull)..."
-ha refresh-updates > /dev/null 2>&1 || echo "  WARNING: refresh-updates failed (continuing with cached store)"
+REFRESH_OUT=$(timeout 120 ha refresh-updates 2>&1 || true)
+if echo "$REFRESH_OUT" | grep -qi "success"; then
+    echo "  Stores refreshed"
+else
+    echo "  WARNING: refresh-updates output: $(echo "$REFRESH_OUT" | tr -d '\n' | head -c 300)"
+fi
 
 echo "→ Checking addon updates..."
 ADDONS_UPDATED=0
@@ -95,10 +103,16 @@ INTEGRATIONS_FAILED=0
 #   - HA Core / HAOS / Supervisor (steps 2 and 4)
 #   - add-on updates (step 1, they come with entity_picture=/api/hassio/...)
 #   - device firmware (OTA of ESPHome/Zigbee devices is not touched)
-PENDING_INTEGRATIONS=$(curl -s --max-time 60 \
+echo "  DIAG: SUPERVISOR_TOKEN len=${#SUPERVISOR_TOKEN}, SUPERVISOR_HOST=${SUPERVISOR_HOST:-unset}"
+echo "  DIAG: ha ping -> $(timeout 30 ha ping 2>&1 | tr -d '\n' | head -c 200)"
+
+HTTP_CODE=$(curl -s -o /tmp/ha_states.json -w '%{http_code}' --max-time 60 \
     -H "X-Supervisor-Token: ${SUPERVISOR_TOKEN:-}" \
-    -H "Content-Type: application/json" \
-    "$HA_API/states" 2>/dev/null | jq -c '
+    "$HA_API/states" 2>/dev/null || echo '000')
+echo "  DIAG: GET $HA_API/states -> HTTP $HTTP_CODE, bytes=$(wc -c < /tmp/ha_states.json 2>/dev/null || echo 0)"
+head -c 300 /tmp/ha_states.json 2>/dev/null; echo
+
+PENDING_INTEGRATIONS=$(jq -c '
     [ .[]
       | select(.entity_id | startswith("update."))
       | select(.state == "on")
@@ -111,7 +125,7 @@ PENDING_INTEGRATIONS=$(curl -s --max-time 60 \
           installed: (.attributes.installed_version // "?"),
           latest: (.attributes.latest_version // "?")
         }
-    ]' 2>/dev/null || echo 'ERROR')
+    ]' /tmp/ha_states.json 2>/dev/null || echo 'ERROR')
 
 if [ "$PENDING_INTEGRATIONS" = "ERROR" ] || ! echo "$PENDING_INTEGRATIONS" | jq -e 'type == "array"' > /dev/null 2>&1; then
     echo "  ERROR: cannot read HA states via supervisor proxy"
