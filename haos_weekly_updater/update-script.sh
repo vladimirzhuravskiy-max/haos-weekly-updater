@@ -71,7 +71,7 @@ ADDONS_FAILED=0
 # slug returns only the calling add-on. `ha available-updates --raw-json` is the
 # reliable way to enumerate everything that has a pending update.
 UPDATES_JSON=$(timeout 60 ha available-updates --raw-json 2>&1 || true)
-echo "  DIAG: available-updates -> $(echo "$UPDATES_JSON" | head -c 150)"
+echo "  available-updates: $(echo "$UPDATES_JSON" | jq -c '[.data.available_updates[]? | {t: .update_type, n: .name}]' 2>/dev/null | head -c 200)"
 
 for addon in $(echo "$UPDATES_JSON" | jq -r '.data.available_updates[]? | select(.update_type == "addon") | (.panel_path | split("/") | last)' 2>/dev/null); do
     echo "  Updating addon: $addon"
@@ -121,7 +121,7 @@ INTEGRATIONS_FAILED=0
 #   - HA Core / HAOS / Supervisor (steps 2 and 4)
 #   - add-on updates (step 1, they come with entity_picture=/api/hassio/...)
 #   - device firmware (OTA of ESPHome/Zigbee devices is not touched)
-echo "  DIAG: SUPERVISOR_TOKEN len=${#SUPERVISOR_TOKEN}"
+# TEMP DIAG removed — kept only the HTTP code log
 # Home Assistant may still be restarting (e.g. right after a Core update) —
 # wait for the API to answer 200 before reading the states.
 echo -n "  Waiting for Home Assistant API"
@@ -139,33 +139,27 @@ done
 if [ "$HA_READY" -ne 1 ]; then
     echo " (timeout, HTTP $C)"
 fi
-# TEMP DIAG: who answers and with what (status + Server header + body)
-for P in /addons/self/info; do
-    C=$(curl -s -o /tmp/p.json -D /tmp/p.hdr -w '%{http_code}' --max-time 30 \
-        -H "X-Supervisor-Token: ${SUPERVISOR_TOKEN}" "http://supervisor$P" 2>/dev/null || echo '000')
-    S=$(grep -i '^server:' /tmp/p.hdr 2>/dev/null | tr -d '\r')
-    echo "  DIAG: GET http://supervisor$P -> HTTP $C ${S}body=$(head -c 100 /tmp/p.json 2>/dev/null | tr -d '\n')"
-done
-for P in /config /states; do
-    C=$(curl -s -o /tmp/p.json -D /tmp/p.hdr -w '%{http_code}' --max-time 30 \
-        "${HA_AUTH[@]}" "$HA_API$P" 2>/dev/null || echo '000')
-    S=$(grep -i '^server:' /tmp/p.hdr 2>/dev/null | tr -d '\r')
-    echo "  DIAG: GET $HA_API$P -> HTTP $C ${S}body=$(head -c 100 /tmp/p.json 2>/dev/null | tr -d '\n')"
-done
+
+# Names of all installed add-ons (from the Supervisor). Add-on update entities
+# carry the add-on name as their title; some add-ons have no icon, so
+# entity_picture can be null and must not be the only exclusion signal.
+ADDON_NAMES=$(curl -s --max-time 30 -H "X-Supervisor-Token: ${SUPERVISOR_TOKEN}" \
+    http://supervisor/addons 2>/dev/null | jq -c '[.data.addons[]?.name]')
 
 HTTP_CODE=$(curl -s -o /tmp/ha_states.json -w '%{http_code}' --max-time 60 \
     "${HA_AUTH[@]}" \
     "$HA_API/states" 2>/dev/null || echo '000')
-echo "  DIAG: GET $HA_API/states -> HTTP $HTTP_CODE, bytes=$(wc -c < /tmp/ha_states.json 2>/dev/null || echo 0)"
-head -c 300 /tmp/ha_states.json 2>/dev/null; echo
+echo "  GET $HA_API/states -> HTTP $HTTP_CODE ($(wc -c < /tmp/ha_states.json 2>/dev/null || echo 0) bytes)"
 
-PENDING_INTEGRATIONS=$(jq -c '
+PENDING_INTEGRATIONS=$(jq -c --argjson addons "${ADDON_NAMES:-[]}" '
     [ .[]
       | select(.entity_id | startswith("update."))
       | select(.state == "on")
       | select(.entity_id | test("^update\\.(home_assistant_core|home_assistant_operating_system|supervisor|observer)") | not)
-      | select((.attributes.entity_picture // "") | contains("/api/hassio/") | not)
+      | select(((.attributes.entity_picture // "") | startswith("/api/hassio/")) | not)
       | select((.attributes.device_class // "") != "firmware")
+      | select(((.attributes.title // "" | ascii_downcase) as $t
+                | ($addons | map(ascii_downcase) | index($t))) == null)
       | {
           entity: .entity_id,
           name: (.attributes.friendly_name // .entity_id),
@@ -180,11 +174,6 @@ if [ "$PENDING_INTEGRATIONS" = "ERROR" ] || ! echo "$PENDING_INTEGRATIONS" | jq 
 else
     PENDING_COUNT=$(echo "$PENDING_INTEGRATIONS" | jq 'length')
     echo "  Found $PENDING_COUNT integration update(s)"
-
-    # TEMP DIAG: attribute keys/values to build a reliable add-on filter
-    for E in $(jq -r '[.[] | select(.entity_id | startswith("update.")) | select(.attributes.installed_version != null) | .entity_id][0:8][]' /tmp/ha_states.json 2>/dev/null); do
-        echo "  DIAGATTR $E :: $(jq -c --arg e "$E" '.[] | select(.entity_id == $e) | .attributes' /tmp/ha_states.json 2>/dev/null | head -c 500)"
-    done
 
     if [ "$PENDING_COUNT" -gt 0 ]; then
         echo "$PENDING_INTEGRATIONS" | jq -r '.[] | "  - \(.name) (\(.installed) -> \(.latest)) [\(.entity)]"'
@@ -280,6 +269,12 @@ if [ $NEED_REBOOT -eq 1 ]; then
     MESSAGE="$MESSAGE
 
 🔄 **Дія:** HAOS перезавантажено автоматично"
+fi
+
+if [ "$INTEGRATIONS_UPDATED" -gt 0 ]; then
+    MESSAGE="$MESSAGE
+
+ℹ️ Деякі інтеграції оновлено — можливо потрібен перезапуск Home Assistant"
 fi
 
 if [ ${#UPDATED[@]} -eq 0 ] && [ ${#FAILED[@]} -eq 0 ]; then

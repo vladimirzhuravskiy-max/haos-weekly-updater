@@ -27,7 +27,7 @@ for V in SUPERVISOR_TOKEN HASSIO_TOKEN; do
         export "$V"="$(cat "/run/s6/container_environment/$V")"
     fi
 done
-echo "DIAG token: SUPERVISOR_TOKEN=${#SUPERVISOR_TOKEN}b HASSIO_TOKEN=${#HASSIO_TOKEN}b"
+echo "Supervisor token loaded: SUPERVISOR_TOKEN=${#SUPERVISOR_TOKEN}b HASSIO_TOKEN=${#HASSIO_TOKEN}b"
 
 # On-demand run: switching run_on_start from false to true executes the update
 # script once immediately (state is remembered in /data, so leaving the option
