@@ -52,10 +52,10 @@ for addon in $(ha addons list --format json 2>/dev/null | jq -r '.[] | select(.u
     echo "  Updating addon: $addon"
     if ha addons update "$addon" 2>&1 | tail -5; then
         UPDATED+=("Addon: $addon")
-        ((ADDONS_UPDATED++))
+        ADDONS_UPDATED=$((ADDONS_UPDATED + 1))
     else
         FAILED+=("Addon: $addon")
-        ((ADDONS_FAILED++))
+        ADDONS_FAILED=$((ADDONS_FAILED + 1))
     fi
 done
 
