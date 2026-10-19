@@ -16,6 +16,8 @@ fi
 echo "[$(date)] Starting HAOS Weekly Updater"
 echo "Timezone: ${TZ:-Europe/Kyiv}"
 echo "Localtime: $(readlink -f /etc/localtime 2>/dev/null || echo 'n/a')"
+# TEMP DIAG: names (not values) of env vars related to supervisor/tokens
+echo "DIAG env: $(env | cut -d= -f1 | grep -iE 'token|hassio|supervis' | sort | tr '\n' ' ')"
 
 # On-demand run: switching run_on_start from false to true executes the update
 # script once immediately (state is remembered in /data, so leaving the option

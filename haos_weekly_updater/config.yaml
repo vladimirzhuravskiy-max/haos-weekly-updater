@@ -1,5 +1,5 @@
 name: "HAOS Weekly Updater"
-version: "0.4.2"
+version: "0.4.3"
 slug: "haos_weekly_updater"
 description: "Автоматичне оновлення HAOS, Core, аддонів та інтеграцій щотижня у вівторок о 8:00 з повідомленням в Telegram"
 arch:

@@ -20,7 +20,8 @@ LOG_FILE="/data/update-$(date +%F).log"
 exec > >(tee -a "$LOG_FILE") 2>&1
 
 # Supervisor token is injected by the Supervisor (hassio_api: true)
-SUPERVISOR_TOKEN="${SUPERVISOR_TOKEN:-}"
+SUPERVISOR_TOKEN="${SUPERVISOR_TOKEN:-${HASSIO_TOKEN:-}}"
+echo "  DIAG: token vars: SUPERVISOR_TOKEN len=${#SUPERVISOR_TOKEN}"
 
 echo "=== HAOS Weekly Update $(date) ==="
 
