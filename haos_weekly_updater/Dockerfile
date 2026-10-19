@@ -3,6 +3,8 @@ FROM ${BUILD_FROM}
 
 ENV LANG C.UTF-8
 
+# NOTE: dcron runs jobs with a minimal PATH (/usr/bin:/bin) and rejects PATH=
+# lines in the crontab, so `ha` is also linked into /usr/bin.
 RUN apk add --no-cache \
     jq \
     curl \
@@ -11,7 +13,8 @@ RUN apk add --no-cache \
     dcron \
     && curl -fsSL https://github.com/home-assistant/cli/releases/download/5.5.0/ha_amd64 \
     -o /usr/local/bin/ha \
-    && chmod +x /usr/local/bin/ha
+    && chmod +x /usr/local/bin/ha \
+    && ln -sf /usr/local/bin/ha /usr/bin/ha
 
 ENV HASSIO_TOKEN=${HASSIO_TOKEN}
 
