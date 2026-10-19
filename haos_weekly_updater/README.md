@@ -135,9 +135,10 @@ haos_weekly_updater/
 
 | Проблема | Рішення |
 |----------|---------|
-| "ha: command not found" | Перевірте `hassio_api: true` та `hassio_role: admin` в config.yaml |
-| "Permission denied" | `full_access: true` + `host_network: true` |
-| Cron не запускається | Перевірте логи: `ha addons logs haos_weekly_updater` |
+| "ha: command not found" | `hassio_api: true` + `hassio_role: admin` у config.yaml; `ha` додатково зсилений у `/usr/bin` (dcron дає cron-джобам мінімальний PATH) |
+| "401 unauthorized" від `ha` або `/core/api` | Токен читається з `/run/s6/container_environment/SUPERVISOR_TOKEN` (CMD не успадковує env контейнера); для проксі HA API потрібен заголовок `Authorization: Bearer`, а не `X-Supervisor-Token` |
+| Cron не запускається | `ha apps logs 762d1bf8_haos_weekly_updater` і шукайте `failed parsing crontab` (dcron відкидає ВЕСЬ crontab, якщо в ньому є рядок `PATH=...`); вивід cron-джобів не потрапляє у лог контейнера — дивіться `/data/update-YYYY-MM-DD.log` і Telegram-звіт |
+| `ha addons list --format json` → unknown flag | У CLI 5.5.0 немає `addons list`/`--format`: використовуйте `ha available-updates --raw-json` |
 | Telegram не працює | Перевірте token/chat_id, чи є інтернет у контейнері |
 | Диск переповнений | Зменшіть `log_retention_days`, перевірте `/data` |
 
