@@ -16,12 +16,18 @@ fi
 echo "[$(date)] Starting HAOS Weekly Updater"
 echo "Timezone: ${TZ:-Europe/Kyiv}"
 echo "Localtime: $(readlink -f /etc/localtime 2>/dev/null || echo 'n/a')"
-# TEMP DIAG: names (not values) of env vars related to supervisor/tokens
-echo "DIAG env: $(env | cut -d= -f1 | grep -iE 'token|hassio|supervis' | sort | tr '\n' ' ')"
-echo "DIAG env-all: $(env | cut -d= -f1 | sort | tr '\n' ' ')"
-echo "DIAG s6env: $(ls /run/s6/container_environment/ 2>/dev/null | grep -iE 'token|hassio|supervis' | tr '\n' ' ')"
-echo "DIAG s6env-all: $(ls /run/s6/container_environment/ 2>/dev/null | tr '\n' ' ')"
-echo "DIAG passwd-env: $(cat /run/s6/container_environment/SUPERVISOR_TOKEN 2>/dev/null | wc -c) bytes in SUPERVISOR_TOKEN file"
+
+# The Supervisor puts its API token into /run/s6/container_environment, but the
+# CMD process does NOT inherit the container environment (only PATH/PWD/TZ...).
+# Without this the `ha` CLI and the supervisor proxy return 401 "unauthorized".
+SUPERVISOR_TOKEN="${SUPERVISOR_TOKEN:-}"
+HASSIO_TOKEN="${HASSIO_TOKEN:-}"
+for V in SUPERVISOR_TOKEN HASSIO_TOKEN; do
+    if [ -z "${!V}" ] && [ -s "/run/s6/container_environment/$V" ]; then
+        export "$V"="$(cat "/run/s6/container_environment/$V")"
+    fi
+done
+echo "DIAG token: SUPERVISOR_TOKEN=${#SUPERVISOR_TOKEN}b HASSIO_TOKEN=${#HASSIO_TOKEN}b"
 
 # On-demand run: switching run_on_start from false to true executes the update
 # script once immediately (state is remembered in /data, so leaving the option

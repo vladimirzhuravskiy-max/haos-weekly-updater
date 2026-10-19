@@ -19,9 +19,16 @@ fi
 LOG_FILE="/data/update-$(date +%F).log"
 exec > >(tee -a "$LOG_FILE") 2>&1
 
-# Supervisor token is injected by the Supervisor (hassio_api: true)
-SUPERVISOR_TOKEN="${SUPERVISOR_TOKEN:-${HASSIO_TOKEN:-}}"
-echo "  DIAG: token vars: SUPERVISOR_TOKEN len=${#SUPERVISOR_TOKEN}"
+# Supervisor token: cron jobs do not inherit the daemon environment, so read it
+# from /run/s6/container_environment (the Supervisor does not export it into the
+# CMD process environment; without this every `ha`/API call returns 401).
+SUPERVISOR_TOKEN="${SUPERVISOR_TOKEN:-}"
+HASSIO_TOKEN="${HASSIO_TOKEN:-}"
+for V in SUPERVISOR_TOKEN HASSIO_TOKEN; do
+    if [ -z "${!V}" ] && [ -s "/run/s6/container_environment/$V" ]; then
+        export "$V"="$(cat "/run/s6/container_environment/$V")"
+    fi
+done
 
 echo "=== HAOS Weekly Update $(date) ==="
 
@@ -104,8 +111,9 @@ INTEGRATIONS_FAILED=0
 #   - HA Core / HAOS / Supervisor (steps 2 and 4)
 #   - add-on updates (step 1, they come with entity_picture=/api/hassio/...)
 #   - device firmware (OTA of ESPHome/Zigbee devices is not touched)
-echo "  DIAG: SUPERVISOR_TOKEN len=${#SUPERVISOR_TOKEN}, SUPERVISOR_HOST=${SUPERVISOR_HOST:-unset}"
-echo "  DIAG: ha ping -> $(timeout 30 ha ping 2>&1 | tr -d '\n' | head -c 200)"
+echo "  DIAG: SUPERVISOR_TOKEN len=${#SUPERVISOR_TOKEN}"
+HA_LIST_OUT=$(timeout 30 ha addons list --format json 2>&1 || true)
+echo "  DIAG: ha addons list -> $(echo "$HA_LIST_OUT" | tr -d '\n' | head -c 120)"
 
 HTTP_CODE=$(curl -s -o /tmp/ha_states.json -w '%{http_code}' --max-time 60 \
     -H "X-Supervisor-Token: ${SUPERVISOR_TOKEN:-}" \
