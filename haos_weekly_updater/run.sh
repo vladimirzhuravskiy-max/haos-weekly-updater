@@ -9,7 +9,7 @@ if [ -f /data/options.json ]; then
     # /etc/localtime, which defaults to UTC in the HA base image. Without this
     # symlink "0 8 * * 1" would actually fire at 08:00 UTC (= 11:00 Kyiv).
     if [ -f "/usr/share/zoneinfo/$TIMEZONE" ]; then
-        ln -snf "/usr/share/zoneinfo/$TIMEZONE" /etc/localtime
+        ln -snf "/usr/share/zoneinfo/$TIMEZONE" /etc/localtime || true
     fi
 fi
 
