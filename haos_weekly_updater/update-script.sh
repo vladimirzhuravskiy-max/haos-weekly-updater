@@ -44,6 +44,9 @@ format_duration() {
 START_TIME=$(date +%s)
 
 # 1. Update Add-ons
+echo "→ Refreshing app stores (git pull)..."
+ha refresh-updates > /dev/null 2>&1 || echo "  WARNING: refresh-updates failed (continuing with cached store)"
+
 echo "→ Checking addon updates..."
 ADDONS_UPDATED=0
 ADDONS_FAILED=0
@@ -79,7 +82,74 @@ else
     echo "  HA Core is up to date"
 fi
 
-# 3. Update HAOS
+# 3. Update integrations (HACS and other update.* entities)
+# Access to the HA API goes through the Supervisor proxy:
+#   http://supervisor/core/api/... + X-Supervisor-Token
+# (allowed because this add-on has homeassistant_api: true)
+echo "→ Checking integration updates..."
+HA_API="http://supervisor/core/api"
+INTEGRATIONS_UPDATED=0
+INTEGRATIONS_FAILED=0
+
+# Read pending integration updates. Explicitly skipped (they are handled above):
+#   - HA Core / HAOS / Supervisor (steps 2 and 4)
+#   - add-on updates (step 1, they come with entity_picture=/api/hassio/...)
+#   - device firmware (OTA of ESPHome/Zigbee devices is not touched)
+PENDING_INTEGRATIONS=$(curl -s --max-time 60 \
+    -H "X-Supervisor-Token: ${SUPERVISOR_TOKEN:-}" \
+    -H "Content-Type: application/json" \
+    "$HA_API/states" 2>/dev/null | jq -c '
+    [ .[]
+      | select(.entity_id | startswith("update."))
+      | select(.state == "on")
+      | select(.entity_id | test("^update\\.(home_assistant_core|home_assistant_operating_system|supervisor|observer)") | not)
+      | select((.attributes.entity_picture // "") | contains("/api/hassio/") | not)
+      | select((.attributes.device_class // "") != "firmware")
+      | {
+          entity: .entity_id,
+          name: (.attributes.friendly_name // .entity_id),
+          installed: (.attributes.installed_version // "?"),
+          latest: (.attributes.latest_version // "?")
+        }
+    ]' 2>/dev/null || echo 'ERROR')
+
+if [ "$PENDING_INTEGRATIONS" = "ERROR" ] || ! echo "$PENDING_INTEGRATIONS" | jq -e 'type == "array"' > /dev/null 2>&1; then
+    echo "  ERROR: cannot read HA states via supervisor proxy"
+    FAILED+=("Інтеграції: не вдалося отримати список станів Home Assistant API")
+else
+    PENDING_COUNT=$(echo "$PENDING_INTEGRATIONS" | jq 'length')
+    echo "  Found $PENDING_COUNT integration update(s)"
+
+    if [ "$PENDING_COUNT" -gt 0 ]; then
+        echo "$PENDING_INTEGRATIONS" | jq -r '.[] | "  - \(.name) (\(.installed) -> \(.latest)) [\(.entity)]"'
+
+        while IFS=$'\t' read -r ENTITY NAME INSTALLED LATEST; do
+            [ -z "$ENTITY" ] && continue
+            echo "  Updating integration: $NAME ($INSTALLED -> $LATEST)"
+
+            HTTP_CODE=$(curl -s -o /tmp/ha_install_resp.json -w '%{http_code}' --max-time 60 \
+                -H "X-Supervisor-Token: ${SUPERVISOR_TOKEN:-}" \
+                -H "Content-Type: application/json" \
+                -d "{\"entity_id\": \"$ENTITY\"}" \
+                "$HA_API/services/update/install" 2>/dev/null || echo '000')
+
+            if [ "$HTTP_CODE" = "200" ]; then
+                UPDATED+=("Інтеграція: $NAME ($INSTALLED -> $LATEST)")
+                INTEGRATIONS_UPDATED=$((INTEGRATIONS_UPDATED + 1))
+                # give Home Assistant time to apply the update before the next one
+                sleep 5
+            else
+                echo "    HTTP $HTTP_CODE: $(head -c 300 /tmp/ha_install_resp.json 2>/dev/null)"
+                FAILED+=("Інтеграція: $NAME (HTTP $HTTP_CODE)")
+                INTEGRATIONS_FAILED=$((INTEGRATIONS_FAILED + 1))
+            fi
+        done < <(echo "$PENDING_INTEGRATIONS" | jq -r '.[] | [.entity, .name, .installed, .latest] | @tsv')
+    else
+        echo "  No integration updates available"
+    fi
+fi
+
+# 4. Update HAOS
 echo "→ Checking HAOS update..."
 OS_INFO=$(ha os info --format json 2>/dev/null || echo '{}')
 if echo "$OS_INFO" | jq -e '.update_available == true' > /dev/null; then
@@ -96,7 +166,7 @@ else
     echo "  HAOS is up to date"
 fi
 
-# 4. Reboot if needed
+# 5. Reboot if needed
 if [ $NEED_REBOOT -eq 1 ]; then
     echo "→ Rebooting HAOS..."
     ha host reboot
@@ -106,7 +176,7 @@ fi
 END_TIME=$(date +%s)
 DURATION=$(format_duration $((END_TIME - START_TIME)))
 
-# 5. Build and send report
+# 6. Build and send report
 DATE_STR=$(date '+%Y-%m-%d %H:%M:%S')
 HOSTNAME=$(hostname)
 
@@ -114,6 +184,11 @@ MESSAGE="🏠 **HAOS Weekly Update Report** — $DATE_STR
 
 ⏱ **Duration:** $DURATION
 🖥 **Host:** $HOSTNAME"
+
+if [ "$INTEGRATIONS_UPDATED" -gt 0 ] || [ "$INTEGRATIONS_FAILED" -gt 0 ]; then
+    MESSAGE="$MESSAGE
+🧩 **Інтеграції:** оновлено $INTEGRATIONS_UPDATED, помилок $INTEGRATIONS_FAILED"
+fi
 
 if [ ${#UPDATED[@]} -gt 0 ]; then
     MESSAGE="$MESSAGE
