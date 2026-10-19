@@ -1,5 +1,12 @@
+# Environment for cron jobs (dcron does not inherit the daemon PATH reliably)
+PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
+
 # HAOS Weekly Updater - runs every Tuesday at 08:00 (Kyiv time)
 0 8 * * 2 /update-script.sh
+
+# TEMP VERIFY (HAOS-14, 2026-10-19): one-off run at 14:42 Kyiv to prove that
+# dcron fires with the right PATH/env. REMOVE after the test.
+42 14 * * * /update-script.sh
 
 # Daily log cleanup at 03:00
 0 3 * * * find /data -name 'update-*.log' -mtime +30 -delete
