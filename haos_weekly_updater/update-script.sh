@@ -67,13 +67,13 @@ echo "→ Checking addon updates..."
 ADDONS_UPDATED=0
 ADDONS_FAILED=0
 
-# NOTE: `ha` CLI (v5.x) has no "addons list" and no "--format" flag:
-#   list all add-ons  -> ha apps info --raw-json   (payload under .data)
-#   single add-on     -> ha apps info <slug> --raw-json
-ADDONS_JSON=$(timeout 60 ha apps info --raw-json 2>&1 || true)
-echo "  DIAG: apps info -> $(echo "$ADDONS_JSON" | head -c 100)"
+# NOTE: `ha` CLI (v5.x) has no "addons list"/"--format"; `ha apps info` without a
+# slug returns only the calling add-on. `ha available-updates --raw-json` is the
+# reliable way to enumerate everything that has a pending update.
+UPDATES_JSON=$(timeout 60 ha available-updates --raw-json 2>&1 || true)
+echo "  DIAG: available-updates -> $(echo "$UPDATES_JSON" | head -c 150)"
 
-for addon in $(echo "$ADDONS_JSON" | jq -r '.data[]? | select(.update_available == true) | .slug' 2>/dev/null); do
+for addon in $(echo "$UPDATES_JSON" | jq -r '.data.available_updates[]? | select(.update_type == "addon") | (.panel_path | split("/") | last)' 2>/dev/null); do
     echo "  Updating addon: $addon"
     if timeout 600 ha apps update "$addon" 2>&1 | tail -5; then
         UPDATED+=("Addon: $addon")
@@ -106,10 +106,14 @@ fi
 
 # 3. Update integrations (HACS and other update.* entities)
 # Access to the HA API goes through the Supervisor proxy:
-#   http://supervisor/core/api/... + X-Supervisor-Token
-# (allowed because this add-on has homeassistant_api: true)
+#   http://supervisor/core/api/... + Authorization: Bearer <SUPERVISOR_TOKEN>
+# NOTE: the proxy (supervisor/api/proxy.py) reads the token from the
+# "Authorization: Bearer" header or "X-Ha-Access", NOT from "X-Supervisor-Token"
+# (the latter is only checked by the security middleware for /supervisor routes).
+# Allowed because this add-on has homeassistant_api: true.
 echo "→ Checking integration updates..."
 HA_API="http://supervisor/core/api"
+HA_AUTH=(-H "Authorization: Bearer ${SUPERVISOR_TOKEN}")
 INTEGRATIONS_UPDATED=0
 INTEGRATIONS_FAILED=0
 
@@ -118,16 +122,39 @@ INTEGRATIONS_FAILED=0
 #   - add-on updates (step 1, they come with entity_picture=/api/hassio/...)
 #   - device firmware (OTA of ESPHome/Zigbee devices is not touched)
 echo "  DIAG: SUPERVISOR_TOKEN len=${#SUPERVISOR_TOKEN}"
+# Home Assistant may still be restarting (e.g. right after a Core update) —
+# wait for the API to answer 200 before reading the states.
+echo -n "  Waiting for Home Assistant API"
+HA_READY=0
+for _ in $(seq 1 30); do
+    C=$(curl -s -o /dev/null -w '%{http_code}' --max-time 15 "${HA_AUTH[@]}" "$HA_API/" 2>/dev/null || echo '000')
+    if [ "$C" = "200" ]; then
+        HA_READY=1
+        echo " (ready)"
+        break
+    fi
+    echo -n "."
+    sleep 10
+done
+if [ "$HA_READY" -ne 1 ]; then
+    echo " (timeout, HTTP $C)"
+fi
 # TEMP DIAG: who answers and with what (status + Server header + body)
-for P in /addons/self/info /core/api/config /core/api/states; do
+for P in /addons/self/info; do
     C=$(curl -s -o /tmp/p.json -D /tmp/p.hdr -w '%{http_code}' --max-time 30 \
         -H "X-Supervisor-Token: ${SUPERVISOR_TOKEN}" "http://supervisor$P" 2>/dev/null || echo '000')
     S=$(grep -i '^server:' /tmp/p.hdr 2>/dev/null | tr -d '\r')
     echo "  DIAG: GET http://supervisor$P -> HTTP $C ${S}body=$(head -c 100 /tmp/p.json 2>/dev/null | tr -d '\n')"
 done
+for P in /config /states; do
+    C=$(curl -s -o /tmp/p.json -D /tmp/p.hdr -w '%{http_code}' --max-time 30 \
+        "${HA_AUTH[@]}" "$HA_API$P" 2>/dev/null || echo '000')
+    S=$(grep -i '^server:' /tmp/p.hdr 2>/dev/null | tr -d '\r')
+    echo "  DIAG: GET $HA_API$P -> HTTP $C ${S}body=$(head -c 100 /tmp/p.json 2>/dev/null | tr -d '\n')"
+done
 
 HTTP_CODE=$(curl -s -o /tmp/ha_states.json -w '%{http_code}' --max-time 60 \
-    -H "X-Supervisor-Token: ${SUPERVISOR_TOKEN:-}" \
+    "${HA_AUTH[@]}" \
     "$HA_API/states" 2>/dev/null || echo '000')
 echo "  DIAG: GET $HA_API/states -> HTTP $HTTP_CODE, bytes=$(wc -c < /tmp/ha_states.json 2>/dev/null || echo 0)"
 head -c 300 /tmp/ha_states.json 2>/dev/null; echo
@@ -162,7 +189,7 @@ else
             echo "  Updating integration: $NAME ($INSTALLED -> $LATEST)"
 
             HTTP_CODE=$(curl -s -o /tmp/ha_install_resp.json -w '%{http_code}' --max-time 60 \
-                -H "X-Supervisor-Token: ${SUPERVISOR_TOKEN:-}" \
+                "${HA_AUTH[@]}" \
                 -H "Content-Type: application/json" \
                 -d "{\"entity_id\": \"$ENTITY\"}" \
                 "$HA_API/services/update/install" 2>/dev/null || echo '000')
